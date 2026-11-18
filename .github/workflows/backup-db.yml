@@ -1,0 +1,63 @@
+name: Backup Diario Cifrado — PostgreSQL & Storage (RPO 24h)
+
+on:
+  schedule:
+    # Todos los días a las 06:00 UTC (03:00 AM Argentina)
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  encrypted-backup:
+    name: Exportar pg_dump, Cifrar AES-256-GCM y Verificar Restauración
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL 17 client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Dump PostgreSQL database and Encrypt with AES-256-GCM
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: |
+          mkdir -p backups
+          TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
+          RAW_FILE="backups/zyven-db-${TIMESTAMP}.sql"
+          ENC_FILE="backups/zyven-db-${TIMESTAMP}.sql.enc"
+
+          pg_dump "$SUPABASE_DB_URL" \
+            --no-owner \
+            --no-acl \
+            --schema=public \
+            --file="$RAW_FILE"
+
+          openssl enc -aes-256-gcm -salt -pbkdf2 -iter 120000 \
+            -in "$RAW_FILE" \
+            -out "$ENC_FILE" \
+            -pass env:BACKUP_ENCRYPTION_KEY
+
+          # Verificar descifrado inmediato antes de eliminar copia en texto plano
+          openssl enc -d -aes-256-gcm -pbkdf2 -iter 120000 \
+            -in "$ENC_FILE" \
+            -out "${RAW_FILE}.verified" \
+            -pass env:BACKUP_ENCRYPTION_KEY
+
+          cmp -s "$RAW_FILE" "${RAW_FILE}.verified"
+          rm -f "$RAW_FILE" "${RAW_FILE}.verified"
+
+      - name: Upload Encrypted Backup Artifact (Retención 30 días, Privado)
+        uses: actions/upload-artifact@v4
+        with:
+          name: zyven-encrypted-db-backup-${{ github.run_id }}
+          path: backups/*.enc
+          retention-days: 30
+          if-no-files-found: error
