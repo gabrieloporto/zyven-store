@@ -54,6 +54,8 @@ export async function getActiveCatalogProducts(
 
   const supabase = await createSupabaseServerClient();
 
+  const brandsJoin = filters.brandSlug ? 'brands!inner(name, slug)' : 'brands(name, slug)';
+
   let query = supabase
     .from('products')
     .select(
@@ -66,7 +68,7 @@ export async function getActiveCatalogProducts(
       has_variants,
       created_at,
       categories!inner(name, slug),
-      brands(name, slug),
+      ${brandsJoin},
       product_variants!inner(
         id,
         sku,
