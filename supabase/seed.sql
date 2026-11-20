@@ -18,7 +18,7 @@ DECLARE
   v_brand_rabanne UUID;
   v_brand_xerjoff UUID;
   v_brand_ch UUID;
-  v_brand_onlyou UUID;
+  v_brand_pattern UUID;
   v_brand_armani UUID;
   v_brand_apple UUID;
   v_brand_jbl UUID;
@@ -51,7 +51,7 @@ BEGIN
     ('Paco Rabanne', 'paco-rabanne'),
     ('Xerjoff', 'xerjoff'),
     ('Carolina Herrera', 'carolina-herrera'),
-    ('Onlyou', 'onlyou'),
+    ('Pattern', 'pattern'),
     ('Emporio Armani', 'emporio-armani'),
     ('Apple', 'apple'),
     ('JBL', 'jbl'),
@@ -63,7 +63,7 @@ BEGIN
   SELECT id INTO v_brand_rabanne FROM public.brands WHERE slug = 'paco-rabanne';
   SELECT id INTO v_brand_xerjoff FROM public.brands WHERE slug = 'xerjoff';
   SELECT id INTO v_brand_ch FROM public.brands WHERE slug = 'carolina-herrera';
-  SELECT id INTO v_brand_onlyou FROM public.brands WHERE slug = 'onlyou';
+  SELECT id INTO v_brand_pattern FROM public.brands WHERE slug = 'pattern';
   SELECT id INTO v_brand_armani FROM public.brands WHERE slug = 'emporio-armani';
   SELECT id INTO v_brand_apple FROM public.brands WHERE slug = 'apple';
   SELECT id INTO v_brand_jbl FROM public.brands WHERE slug = 'jbl';
@@ -80,13 +80,13 @@ BEGIN
         (v_cat_perfumes, v_brand_valentino, 'Valentino Uomo Born in Roma Intense 100 ml', 'valentino-uomo-born-in-roma-intense-100ml', 'ZYV-PERF-VAL-BIRI-100', '100 ml', false, '["Presentación"]'::jsonb, '{"Presentación": "100 ml"}'::jsonb, '{"volumen_ml": 100, "concentracion": "Eau de Parfum Intense"}'::jsonb, 230000::bigint, 2, true, false, 'none', true, NULL::text, 460),
         (v_cat_perfumes, v_brand_xerjoff, 'Xerjoff Erba Pura con pañuelo 100 ml', 'xerjoff-erba-pura-con-panuelo-100ml', 'ZYV-PERF-XER-ERBA-100', '100 ml con pañuelo', false, '["Presentación"]'::jsonb, '{"Presentación": "100 ml con pañuelo"}'::jsonb, '{"volumen_ml": 100, "concentracion": "Eau de Parfum", "incluye_panuelo": true}'::jsonb, 360000::bigint, 2, true, false, 'none', true, NULL::text, 600),
         (v_cat_perfumes, v_brand_xerjoff, 'Xerjoff Purple Accento 100 ml', 'xerjoff-purple-accento-100ml', 'ZYV-PERF-XER-PACC-100', '100 ml', false, '["Presentación"]'::jsonb, '{"Presentación": "100 ml"}'::jsonb, '{"volumen_ml": 100, "concentracion": "Eau de Parfum"}'::jsonb, 390000::bigint, 1, true, false, 'none', true, NULL::text, 600),
-        (v_cat_perfumes, v_brand_onlyou, 'Onlyou Perfume Collection Ref. B976-2 EDP 100 ml', 'onlyou-perfume-collection-ref-b976-2-100ml', 'ZYV-PERF-OY-B976-100', '100 ml', false, '["Presentación"]'::jsonb, '{"Presentación": "100 ml"}'::jsonb, '{"volumen_ml": 100, "concentracion": "Eau de Parfum", "referencia": "B976-2", "inspiracion": "Phantom Brown"}'::jsonb, 160000::bigint, 2, true, false, 'none', true, NULL::text, 430),
+        (v_cat_perfumes, v_brand_pattern, 'Pattern Robot B976-2 EDP 100 ml', 'pattern-robot-b976-2-edp-100ml', 'ZYV-PERF-PAT-B976-100', '100 ml', false, '["Presentación"]'::jsonb, '{"Presentación": "100 ml"}'::jsonb, '{"volumen_ml": 100, "concentracion": "Eau de Parfum", "referencia": "B976-2", "edicion": "Robot"}'::jsonb, 160000::bigint, 2, true, false, 'none', true, NULL::text, 430),
         (v_cat_perfumes, v_brand_armani, 'Emporio Armani Stronger With You Intensely Eau de Parfum 100 ml', 'emporio-armani-stronger-with-you-intensely-edp-100ml', 'ZYV-PERF-EA-SWYI-100', '100 ml', false, '["Presentación"]'::jsonb, '{"Presentación": "100 ml"}'::jsonb, '{"volumen_ml": 100, "concentracion": "Eau de Parfum", "familia_olfativa": "Oriental Fougère"}'::jsonb, 220000::bigint, 2, true, false, 'none', true, NULL::text, 440),
         (v_cat_perfumes, v_brand_rabanne, 'Paco Rabanne One Million 100 ml', 'paco-rabanne-one-million-100ml', 'ZYV-PERF-PR-1MIL-100', '100 ml', false, '["Presentación"]'::jsonb, '{"Presentación": "100 ml"}'::jsonb, '{"volumen_ml": 100, "concentracion": "Eau de Toilette"}'::jsonb, 200000::bigint, 3, true, false, 'none', true, NULL::text, 440),
-        (v_cat_perfumes, v_brand_ch, 'Carolina Herrera Bad Boy Eau de Parfum 110 ml', 'carolina-herrera-bad-boy-edp-110ml', 'ZYV-PERF-CH-BBOY-110', '110 ml', false, '["Presentación"]'::jsonb, '{"Presentación": "110 ml"}'::jsonb, '{"volumen_ml": 110, "concentracion": "Eau de Parfum"}'::jsonb, 210000::bigint, 2, true, false, 'none', true, NULL::text, 480),
+        (v_cat_perfumes, v_brand_ch, 'Carolina Herrera Bad Boy Extreme EDP 100 ml', 'carolina-herrera-bad-boy-extreme-edp-100ml', 'ZYV-PERF-CH-BBOYE-100', '100 ml', false, '["Presentación"]'::jsonb, '{"Presentación": "100 ml"}'::jsonb, '{"volumen_ml": 100, "concentracion": "Eau de Parfum Extreme"}'::jsonb, 210000::bigint, 2, true, false, 'none', true, NULL::text, 480),
 
-        -- TECNOLOGÍA (3 simples + JBL GO 4 con 6 variantes de color más abajo)
-        (v_cat_tecnologia, v_brand_apple, 'Cable USB-C para iPhone de 1 metro', 'cable-usb-c-para-iphone-1m', 'ZYV-TEC-CBL-USBC-1M', '1 metro', false, '["Largo"]'::jsonb, '{"Largo": "1 metro"}'::jsonb, '{"longitud_m": 1, "conector": "USB-C", "compatibilidad": "iPhone"}'::jsonb, 12000::bigint, 10, false, false, 'none', true, NULL::text, 80),
+        -- TECNOLOGÍA (Cables USB con 2 tipos + MagSafe + AirPods + JBL GO 4 con 6 colores)
+        (v_cat_tecnologia, v_brand_apple, 'Cable de Carga Apple 1 metro', 'cable-usb-c-para-iphone-1m', 'ZYV-TEC-CBL-USBC-USBC-1M', 'USB-C a USB-C (1 m)', true, '["Tipo de conector"]'::jsonb, '{"Tipo de conector": "USB-C a USB-C"}'::jsonb, '{"longitud_m": 1, "compatibilidad": "iPhone / iPad / AirPods"}'::jsonb, 12000::bigint, 10, false, false, 'none', true, NULL::text, 80),
         (v_cat_tecnologia, v_brand_apple, 'Cargador portátil inalámbrico MagSafe para iPhone', 'cargador-portatil-inalambrico-magsafe-iphone', 'ZYV-TEC-MAGSAFE-BAT', 'Estándar', false, '[]'::jsonb, '{}'::jsonb, '{"tecnologia": "MagSafe inalámbrico", "compatibilidad": "iPhone"}'::jsonb, 35000::bigint, 4, false, true, 'standalone_powerbank', true, NULL::text, 220),
         (v_cat_tecnologia, v_brand_apple, 'AirPods Pro de tercera generación', 'airpods-pro-tercera-generacion', 'ZYV-TEC-AIRPODS-PRO3', 'Blanco', false, '[]'::jsonb, '{}'::jsonb, '{"generacion": "3.ª generación", "conectividad": "Bluetooth"}'::jsonb, 350000::bigint, 2, false, true, 'contained_in_equipment', true, NULL::text, 200),
 
@@ -141,16 +141,16 @@ BEGIN
     ON CONFLICT (idempotency_key) DO NOTHING;
   END LOOP;
 
-  -- 4. Parlante Bluetooth portátil JBL GO 4 Pro con sus 6 variantes de color (Negro, Blanco, Azul, Rojo, Violeta, Rosa)
+  -- 4. Parlante Bluetooth portátil JBL GO 4 con sus 6 variantes de color (Negro, Blanco, Azul, Rojo, Violeta, Rosa)
   INSERT INTO public.products (
     category_id, brand_id, name, slug, status, has_variants,
     option_names, attributes, contains_flammable_liquid,
     contains_lithium_battery, lithium_battery_type,
     requires_special_packaging, commercial_name_confirmed
   ) VALUES (
-    v_cat_tecnologia, v_brand_jbl, 'Parlante Bluetooth portátil JBL GO 4 Pro',
-    'parlante-bluetooth-portatil-jbl-go-4-pro', 'draft', true,
-    '["Color"]'::jsonb, '{"modelo": "GO 4 Pro", "conectividad": "Bluetooth"}'::jsonb,
+    v_cat_tecnologia, v_brand_jbl, 'Parlante Bluetooth portátil JBL GO 4',
+    'parlante-bluetooth-portatil-jbl-go-4', 'draft', true,
+    '["Color"]'::jsonb, '{"modelo": "GO 4", "conectividad": "Bluetooth 5.3", "resistencia": "IP67"}'::jsonb,
     false, true, 'contained_in_equipment', true, true
   )
   ON CONFLICT (slug) DO UPDATE SET updated_at = now()
@@ -159,12 +159,12 @@ BEGIN
   FOR v_color IN
     SELECT * FROM (
       VALUES
-        ('ZYV-TEC-JBL-GO4P-BLK', 'Negro',   '{"Color": "Negro"}'::jsonb,   true,  1),
-        ('ZYV-TEC-JBL-GO4P-WHT', 'Blanco',  '{"Color": "Blanco"}'::jsonb,  false, 2),
-        ('ZYV-TEC-JBL-GO4P-BLU', 'Azul',    '{"Color": "Azul"}'::jsonb,    false, 3),
-        ('ZYV-TEC-JBL-GO4P-RED', 'Rojo',    '{"Color": "Rojo"}'::jsonb,    false, 4),
-        ('ZYV-TEC-JBL-GO4P-VIO', 'Violeta', '{"Color": "Violeta"}'::jsonb, false, 5),
-        ('ZYV-TEC-JBL-GO4P-PNK', 'Rosa',    '{"Color": "Rosa"}'::jsonb,    false, 6)
+        ('ZYV-TEC-JBL-GO4-BLK', 'Negro',   '{"Color": "Negro"}'::jsonb,   true,  1),
+        ('ZYV-TEC-JBL-GO4-WHT', 'Blanco',  '{"Color": "Blanco"}'::jsonb,  false, 2),
+        ('ZYV-TEC-JBL-GO4-BLU', 'Azul',    '{"Color": "Azul"}'::jsonb,    false, 3),
+        ('ZYV-TEC-JBL-GO4-RED', 'Rojo',    '{"Color": "Rojo"}'::jsonb,    false, 4),
+        ('ZYV-TEC-JBL-GO4-VIO', 'Violeta', '{"Color": "Violeta"}'::jsonb, false, 5),
+        ('ZYV-TEC-JBL-GO4-PNK', 'Rosa',    '{"Color": "Rosa"}'::jsonb,    false, 6)
     ) AS c(sku, color_name, opt_val, is_def, s_order)
   LOOP
     INSERT INTO public.product_variants (
