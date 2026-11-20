@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Plus } from 'lucide-react';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { formatArs } from '@/lib/money';
 import { toggleProductPublicationAction } from '@/modules/products/actions';
@@ -32,15 +33,21 @@ export default async function AdminProductsPage() {
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-2xl font-bold text-[#111111]">
+          <h1 className="text-2xl font-bold text-zyven-black">
             Gestión de Catálogo y Productos ({products?.length ?? 0})
           </h1>
           <p className="text-sm text-neutral-600">
-            Todos los productos se crearon inicialmente como borradores (
-            <code>draft</code>). Podés publicarlos o volverlos a borrador desde
-            esta tabla.
+            Administrá tus productos, agregá nuevos artículos y controlá su
+            estado de publicación (<code>draft</code> / <code>active</code>).
           </p>
         </div>
+
+        <Button asChild>
+          <Link href="/admin/productos/nuevo">
+            <Plus className="h-4 w-4" />
+            Nuevo producto
+          </Link>
+        </Button>
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-neutral-200 bg-white">
