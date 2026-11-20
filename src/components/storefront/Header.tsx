@@ -1,14 +1,20 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import {
-  ShoppingBag,
   Search,
   User,
   MapPin,
   ShieldCheck,
   Truck,
+  LayoutDashboard,
 } from 'lucide-react';
 import { ZYVEN_BRAND } from '@/lib/brand';
+import {
+  getCurrentProfile,
+  hasAdminPrivileges,
+} from '@/lib/security/auth-guards';
+import { HeaderCartButton } from './HeaderCartButton';
+import { MobileNavDrawer } from './MobileNavDrawer';
 
 const mainNavLinks = [
   { href: '/productos', label: 'Catálogo' },
@@ -17,7 +23,10 @@ const mainNavLinks = [
   { href: '/categoria/indumentaria', label: 'Indumentaria' },
 ] as const;
 
-export function Header() {
+export async function Header() {
+  const profile = await getCurrentProfile();
+  const isAdmin = hasAdminPrivileges(profile);
+
   return (
     <header className="sticky top-0 z-40 w-full bg-[#111111] text-white shadow-sm">
       {/* Barra informativa superior */}
@@ -42,13 +51,24 @@ export function Header() {
               <ShieldCheck className="h-3.5 w-3.5 text-[#7B19EC]" />
               <span>Pagá seguro con Mercado Pago</span>
             </span>
+            {isAdmin ? (
+              <Link
+                href="/admin"
+                className="inline-flex items-center gap-1.5 rounded-md bg-white/10 px-2.5 py-0.5 text-xs font-semibold text-white transition-colors hover:bg-[#7B19EC]"
+              >
+                <LayoutDashboard className="h-3.5 w-3.5" />
+                <span>Panel Admin</span>
+              </Link>
+            ) : null}
           </div>
         </div>
       </div>
 
       {/* Barra de navegación principal (Fondo #111111 para contraste óptimo con zyven-logo-transparente.webp) */}
-      <div className="mx-auto flex h-20 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center gap-8">
+      <div className="mx-auto flex h-20 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center gap-3 sm:gap-8">
+          <MobileNavDrawer isAdmin={isAdmin} />
+
           <Link
             href="/"
             className="flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7B19EC] rounded-md"
@@ -60,7 +80,7 @@ export function Header() {
               width={ZYVEN_BRAND.assets.logoTransparent.width}
               height={ZYVEN_BRAND.assets.logoTransparent.height}
               priority
-              className="h-12 w-auto object-contain sm:h-14"
+              className="h-11 w-auto object-contain sm:h-14"
             />
           </Link>
 
@@ -105,14 +125,6 @@ export function Header() {
           </form>
 
           <Link
-            href="/productos"
-            aria-label="Buscar en catálogo"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 text-neutral-200 hover:border-[#7B19EC] hover:text-white sm:hidden"
-          >
-            <Search className="h-5 w-5" />
-          </Link>
-
-          <Link
             href="/cuenta"
             aria-label="Mi cuenta"
             className="inline-flex h-10 items-center gap-2 rounded-lg border border-white/10 px-3 text-sm font-medium text-neutral-200 transition-colors hover:border-[#7B19EC] hover:text-white"
@@ -121,32 +133,9 @@ export function Header() {
             <span className="hidden md:inline">Cuenta</span>
           </Link>
 
-          <Link
-            href="/carrito"
-            aria-label="Ver carrito de compras"
-            className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#7B19EC] px-3.5 text-sm font-semibold text-white transition-colors hover:bg-[#6612C9]"
-          >
-            <ShoppingBag className="h-4 w-4" />
-            <span>Carrito</span>
-          </Link>
+          <HeaderCartButton />
         </div>
       </div>
-
-      {/* Navegación móvil de acceso rápido */}
-      <nav
-        aria-label="Categorías móviles"
-        className="flex items-center gap-5 overflow-x-auto border-t border-white/10 px-4 py-2 text-xs font-medium text-neutral-300 lg:hidden"
-      >
-        {mainNavLinks.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className="whitespace-nowrap transition-colors hover:text-white"
-          >
-            {item.label}
-          </Link>
-        ))}
-      </nav>
     </header>
   );
 }

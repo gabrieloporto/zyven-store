@@ -1,4 +1,4 @@
-import Image from 'next/image';
+import { getImageProps } from 'next/image';
 import Link from 'next/link';
 import {
   ArrowRight,
@@ -11,6 +11,8 @@ import {
   Truck,
 } from 'lucide-react';
 import { ZYVEN_BRAND } from '@/lib/brand';
+import { getActiveCatalogProducts } from '@/modules/products/queries';
+import { ProductCard } from '@/components/storefront/ProductCard';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
@@ -19,7 +21,7 @@ const featuredCategories = [
     slug: 'perfumes',
     name: 'Perfumes',
     description:
-      'Fragancias internacionales seleccionadas: Jean Paul Gaultier, Valentino, Xerjoff, Paco Rabanne y Carolina Herrera.',
+      'Fragancias internacionales seleccionadas: Jean Paul Gaultier, Valentino, Xerjoff, Emporio Armani, Paco Rabanne y Carolina Herrera.',
     icon: Sparkles,
     badge: 'Fragancias Originales',
   },
@@ -27,7 +29,7 @@ const featuredCategories = [
     slug: 'tecnologia',
     name: 'Tecnología y Audio',
     description:
-      'Auriculares inalámbricos, parlantes portátiles Bluetooth JBL, cargadores MagSafe y accesorios de carga rápida.',
+      'Auriculares AirPods Pro, parlantes portátiles Bluetooth JBL GO 4 en 6 colores, cargadores MagSafe y cables Apple.',
     icon: Headphones,
     badge: 'Audio & Accesorios',
   },
@@ -35,7 +37,7 @@ const featuredCategories = [
     slug: 'indumentaria',
     name: 'Indumentaria',
     description:
-      'Prendas deportivas y urbanas seleccionadas con gestión de talles y stock real en depósito.',
+      'Prendas deportivas y urbanas seleccionadas como Nike Pro Dri-FIT con gestión de talles, colores y stock real.',
     icon: Shirt,
     badge: 'Estilo & Confort',
   },
@@ -68,26 +70,74 @@ const storePillars = [
   },
 ] as const;
 
-export default function HomePage() {
+export default async function HomePage() {
+  const { items: allProducts } = await getActiveCatalogProducts({
+    pageSize: 24,
+    sortBy: 'featured',
+  });
+
+  // Seleccionar los productos destacados (is_featured) garantizando presencia de las 3 categorías
+  const featuredProducts = allProducts.filter((p) => p.isFeatured);
+  const showcaseProducts =
+    featuredProducts.length > 0 ? featuredProducts.slice(0, 8) : allProducts.slice(0, 8);
+
+  // Art Direction con getImageProps + <picture>: descarga únicamente la versión desktop o mobile en alta calidad (quality: 95)
+  const {
+    props: { srcSet: desktopBannerSrcSet },
+  } = getImageProps({
+    src: ZYVEN_BRAND.assets.heroBannerDesktop.src,
+    alt: ZYVEN_BRAND.assets.heroBannerDesktop.alt,
+    width: ZYVEN_BRAND.assets.heroBannerDesktop.width,
+    height: ZYVEN_BRAND.assets.heroBannerDesktop.height,
+    quality: 95,
+    priority: true,
+    sizes: '100vw',
+  });
+
+  const {
+    props: { srcSet: mobileBannerSrcSet, ...mobileBannerImgProps },
+  } = getImageProps({
+    src: ZYVEN_BRAND.assets.heroBannerMobile.src,
+    alt: ZYVEN_BRAND.assets.heroBannerMobile.alt,
+    width: ZYVEN_BRAND.assets.heroBannerMobile.width,
+    height: ZYVEN_BRAND.assets.heroBannerMobile.height,
+    quality: 95,
+    priority: true,
+    sizes: '100vw',
+  });
+
   return (
     <div className="space-y-16 pb-20">
-      {/* Hero Principal utilizando zyven-banner-principal-v2.webp (1920x640, proporción 3:1 intacta) */}
-      <section aria-label="Presentación principal de Zyven Store" className="bg-[#111111]">
-        <div className="mx-auto max-w-7xl">
-          <div className="relative overflow-hidden">
-            <Image
-              src={ZYVEN_BRAND.assets.heroBanner.src}
-              alt={ZYVEN_BRAND.assets.heroBanner.alt}
-              width={ZYVEN_BRAND.assets.heroBanner.width}
-              height={ZYVEN_BRAND.assets.heroBanner.height}
-              priority
-              sizes="(max-width: 1280px) 100vw, 1280px"
-              className="w-full h-auto object-cover"
+      {/* Hero Principal Responsive (Desktop 3584x1184 y Mobile 1536x2752 en máxima nitidez) */}
+      <section
+        aria-label="Presentación principal de Zyven Store"
+        className="w-full bg-[#111111]"
+      >
+        <div className="relative w-full overflow-hidden">
+          <picture>
+            <source
+              media="(min-width: 768px)"
+              srcSet={desktopBannerSrcSet}
+              width={ZYVEN_BRAND.assets.heroBannerDesktop.width}
+              height={ZYVEN_BRAND.assets.heroBannerDesktop.height}
             />
-          </div>
+            <source
+              media="(max-width: 767px)"
+              srcSet={mobileBannerSrcSet}
+              width={ZYVEN_BRAND.assets.heroBannerMobile.width}
+              height={ZYVEN_BRAND.assets.heroBannerMobile.height}
+            />
+            <img
+              {...mobileBannerImgProps}
+              alt={ZYVEN_BRAND.assets.heroBannerDesktop.alt}
+              className="block h-auto w-full object-cover"
+            />
+          </picture>
+        </div>
 
-          {/* Barra de acción inferior del Hero (sin tapar el texto original del banner) */}
-          <div className="flex flex-col items-start justify-between gap-4 border-t border-white/10 bg-[#111111] px-4 py-5 sm:flex-row sm:items-center sm:px-6 lg:px-8">
+        {/* Barra de acción inferior del Hero */}
+        <div className="border-t border-white/10 bg-[#111111]">
+          <div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-4 px-4 py-5 sm:flex-row sm:items-center sm:px-6 lg:px-8">
             <div className="flex flex-wrap items-center gap-3">
               <Badge variant="default">Tienda Oficial</Badge>
               <p className="text-sm text-neutral-300">
@@ -114,7 +164,67 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Categorías Principales sobre fondo blanco predominante (#FFFFFF) */}
+      {/* Productos Destacados de las 3 Categorías (Punto 1) */}
+      <section
+        aria-labelledby="heading-destacados"
+        className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"
+      >
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+          <div>
+            <Badge variant="violetSoft" className="mb-2">
+              Selección Destacada
+            </Badge>
+            <h2
+              id="heading-destacados"
+              className="text-2xl font-bold tracking-tight text-[#111111] sm:text-3xl"
+            >
+              Lo más buscado en Perfumes, Tecnología e Indumentaria
+            </h2>
+            <p className="mt-1 text-sm text-neutral-600">
+              Productos originales con stock propio listo para despachar desde
+              Alejandro Korn.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href="/categoria/perfumes"
+              className="rounded-full border border-neutral-200 px-3.5 py-1.5 text-xs font-semibold text-[#111111] transition-colors hover:border-[#7B19EC] hover:text-[#7B19EC]"
+            >
+              Perfumes
+            </Link>
+            <Link
+              href="/categoria/tecnologia"
+              className="rounded-full border border-neutral-200 px-3.5 py-1.5 text-xs font-semibold text-[#111111] transition-colors hover:border-[#7B19EC] hover:text-[#7B19EC]"
+            >
+              Tecnología
+            </Link>
+            <Link
+              href="/categoria/indumentaria"
+              className="rounded-full border border-neutral-200 px-3.5 py-1.5 text-xs font-semibold text-[#111111] transition-colors hover:border-[#7B19EC] hover:text-[#7B19EC]"
+            >
+              Indumentaria
+            </Link>
+            <Link
+              href="/productos"
+              className="ml-2 inline-flex items-center gap-1.5 text-sm font-semibold text-[#7B19EC] hover:underline"
+            >
+              Ver todo
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </div>
+
+        {showcaseProducts.length > 0 ? (
+          <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            {showcaseProducts.map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        ) : null}
+      </section>
+
+      {/* Categorías Principales */}
       <section
         aria-labelledby="heading-categorias"
         className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"
@@ -124,18 +234,18 @@ export default function HomePage() {
             <Badge variant="violetSoft" className="mb-2">
               Categorías de la tienda
             </Badge>
-            <h1
+            <h2
               id="heading-categorias"
               className="text-2xl font-bold tracking-tight text-[#111111] sm:text-3xl"
             >
-              Elegí qué estás buscando hoy
-            </h1>
+              Explorá por categoría
+            </h2>
           </div>
           <Link
             href="/productos"
             className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#7B19EC] hover:underline"
           >
-            Ver todos los productos
+            Ver catálogo completo
             <ArrowRight className="h-4 w-4" />
           </Link>
         </div>
@@ -156,9 +266,9 @@ export default function HomePage() {
                     </span>
                     <Badge variant="secondary">{category.badge}</Badge>
                   </div>
-                  <h2 className="mt-5 text-xl font-bold text-[#111111] group-hover:text-[#7B19EC] transition-colors">
+                  <h3 className="mt-5 text-xl font-bold text-[#111111] transition-colors group-hover:text-[#7B19EC]">
                     {category.name}
-                  </h2>
+                  </h3>
                   <p className="mt-2 text-sm leading-relaxed text-neutral-600">
                     {category.description}
                   </p>

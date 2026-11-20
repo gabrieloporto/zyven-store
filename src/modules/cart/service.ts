@@ -40,43 +40,40 @@ export async function getOrCreateGuestCartToken(): Promise<{
   };
 }
 
+export interface CartDetailedItem {
+  itemId: string;
+  variantId: string;
+  productId: string;
+  productName: string;
+  productSlug: string;
+  variantTitle: string;
+  sku: string;
+  imageUrl: string | null;
+  quantity: number;
+  unitPriceCentavos: number;
+  compareAtPriceCentavos: number | null;
+  lineTotalCentavos: number;
+  availableStock: number;
+  weightGrams: number;
+  heightCm: number;
+  widthCm: number;
+  depthCm: number;
+  containsFlammableLiquid: boolean;
+  containsLithiumBattery: boolean;
+  lithiumBatteryType: 'none' | 'contained_in_equipment' | 'standalone_powerbank';
+}
+
 export interface CartDetailedView {
   cartId: string | null;
-  items: Array<{
-    itemId: string;
-    variantId: string;
-    productId: string;
-    productName: string;
-    productSlug: string;
-    variantTitle: string;
-    sku: string;
-    quantity: number;
-    unitPriceCentavos: number;
-    compareAtPriceCentavos: number | null;
-    lineTotalCentavos: number;
-    availableStock: number;
-    weightGrams: number;
-    heightCm: number;
-    widthCm: number;
-    depthCm: number;
-    containsFlammableLiquid: boolean;
-    containsLithiumBattery: boolean;
-    lithiumBatteryType: 'none' | 'contained_in_equipment' | 'standalone_powerbank';
-  }>;
+  items: CartDetailedItem[];
   subtotalCentavos: number;
   discountCentavos: number;
   totalItemsCount: number;
 }
 
-export async function getActiveCartDetailed(): Promise<CartDetailedView> {
+async function resolveOrCreateActiveCartId(createIfMissing: boolean): Promise<string | null> {
   if (!isSupabaseConfigured() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return {
-      cartId: null,
-      items: [],
-      subtotalCentavos: 0,
-      discountCentavos: 0,
-      totalItemsCount: 0,
-    };
+    return null;
   }
 
   const admin = createSupabaseAdminClient();
@@ -97,7 +94,6 @@ export async function getActiveCartDetailed(): Promise<CartDetailedView> {
 
     cartId = userCart?.id ?? null;
 
-    // Si existe un carrito de invitado en la sesión actual, sincronizar/fusionar al iniciar sesión (Sección 8)
     if (rawGuestToken) {
       const guestHash = hashGuestCartToken(rawGuestToken);
       const { data: guestCart } = await admin
@@ -133,16 +129,65 @@ export async function getActiveCartDetailed(): Promise<CartDetailedView> {
         }
       }
     }
-  } else if (rawGuestToken) {
-    const guestHash = hashGuestCartToken(rawGuestToken);
-    const { data: guestCart } = await admin
-      .from('carts')
-      .select('id')
-      .eq('guest_token_hash', guestHash)
-      .maybeSingle();
 
-    cartId = guestCart?.id ?? null;
+    if (!cartId && createIfMissing) {
+      const { data: created, error } = await admin
+        .from('carts')
+        .insert({ user_id: profile.id })
+        .select('id')
+        .single();
+      if (error || !created) {
+        throw new AppError({
+          code: 'INTERNAL_ERROR',
+          message: 'No se pudo inicializar el carrito.',
+        });
+      }
+      cartId = created.id;
+    }
+  } else {
+    if (rawGuestToken) {
+      const guestHash = hashGuestCartToken(rawGuestToken);
+      const { data: guestCart } = await admin
+        .from('carts')
+        .select('id')
+        .eq('guest_token_hash', guestHash)
+        .maybeSingle();
+
+      cartId = guestCart?.id ?? null;
+    }
+
+    if (!cartId && createIfMissing) {
+      const { tokenHash } = await getOrCreateGuestCartToken();
+      const { data: existing } = await admin
+        .from('carts')
+        .select('id')
+        .eq('guest_token_hash', tokenHash)
+        .maybeSingle();
+
+      if (existing) {
+        cartId = existing.id;
+      } else {
+        const { data: created, error } = await admin
+          .from('carts')
+          .insert({ guest_token_hash: tokenHash })
+          .select('id')
+          .single();
+        if (error || !created) {
+          throw new AppError({
+            code: 'INTERNAL_ERROR',
+            message: 'No se pudo inicializar el carrito de invitado.',
+          });
+        }
+        cartId = created.id;
+      }
+    }
   }
+
+  return cartId;
+}
+
+export async function getActiveCartDetailed(): Promise<CartDetailedView> {
+  const cartId = await resolveOrCreateActiveCartId(false);
 
   if (!cartId) {
     return {
@@ -154,12 +199,15 @@ export async function getActiveCartDetailed(): Promise<CartDetailedView> {
     };
   }
 
+  const admin = createSupabaseAdminClient();
+
   const { data: rawItems } = await admin
     .from('cart_items')
     .select(
       `
       id,
       quantity,
+      created_at,
       product_variants!inner(
         id,
         product_id,
@@ -181,15 +229,17 @@ export async function getActiveCartDetailed(): Promise<CartDetailedView> {
           status,
           contains_flammable_liquid,
           contains_lithium_battery,
-          lithium_battery_type
+          lithium_battery_type,
+          product_images(public_url, variant_id, is_primary, sort_order)
         ),
         inventory_levels(on_hand, reserved, available)
       )
     `
     )
-    .eq('cart_id', cartId);
+    .eq('cart_id', cartId)
+    .order('created_at', { ascending: true });
 
-  const items: CartDetailedView['items'] = [];
+  const items: CartDetailedItem[] = [];
 
   for (const row of rawItems ?? []) {
     const v = Array.isArray(row.product_variants)
@@ -204,6 +254,17 @@ export async function getActiveCartDetailed(): Promise<CartDetailedView> {
       ? v.inventory_levels[0]
       : v.inventory_levels;
     const availableStock = Math.max(0, inv?.available ?? 0);
+
+    const imgs: Array<{
+      public_url: string;
+      variant_id: string | null;
+      is_primary: boolean;
+      sort_order: number;
+    }> = Array.isArray(p.product_images) ? p.product_images : [];
+    const variantSpecificImg = imgs.find((img) => img.variant_id === v.id);
+    const primaryImg = imgs.find((img) => img.is_primary) ?? imgs[0] ?? null;
+    const chosenImgUrl =
+      variantSpecificImg?.public_url ?? primaryImg?.public_url ?? null;
 
     const priceInfo = resolveEffectivePriceCentavos({
       priceCentavos: v.price_centavos,
@@ -220,6 +281,7 @@ export async function getActiveCartDetailed(): Promise<CartDetailedView> {
       productSlug: p.slug,
       variantTitle: v.title,
       sku: v.sku,
+      imageUrl: chosenImgUrl,
       quantity: row.quantity,
       unitPriceCentavos: priceInfo.effectivePriceCentavos,
       compareAtPriceCentavos: priceInfo.compareAtPriceCentavos,
@@ -254,71 +316,115 @@ export async function getActiveCartDetailed(): Promise<CartDetailedView> {
   };
 }
 
+/**
+ * Incrementa la cantidad de una variante en el carrito (ej. al pulsar "Agregar al carrito").
+ */
+export async function addCartItemServer(params: {
+  variantId: string;
+  quantityToAdd: number;
+}): Promise<CartDetailedView> {
+  if (
+    !Number.isSafeInteger(params.quantityToAdd) ||
+    params.quantityToAdd <= 0 ||
+    params.quantityToAdd > 50
+  ) {
+    throw new AppError({
+      code: 'VALIDATION_ERROR',
+      message: 'La cantidad a agregar debe ser entre 1 y 50 unidades.',
+    });
+  }
+
+  const cartId = await resolveOrCreateActiveCartId(true);
+  if (!cartId) {
+    throw new AppError({
+      code: 'INTERNAL_ERROR',
+      message: 'No se pudo acceder al servicio de carrito.',
+    });
+  }
+
+  const admin = createSupabaseAdminClient();
+
+  const [{ data: existingItem }, { data: inv }] = await Promise.all([
+    admin
+      .from('cart_items')
+      .select('id, quantity')
+      .eq('cart_id', cartId)
+      .eq('variant_id', params.variantId)
+      .maybeSingle(),
+    admin
+      .from('inventory_levels')
+      .select('available')
+      .eq('variant_id', params.variantId)
+      .maybeSingle(),
+  ]);
+
+  const available = inv?.available ?? 0;
+  const currentQty = existingItem?.quantity ?? 0;
+  const targetQty = currentQty + params.quantityToAdd;
+
+  if (available <= 0) {
+    throw new AppError({
+      code: 'INSUFFICIENT_STOCK',
+      message: 'Este producto no tiene stock disponible en este momento.',
+    });
+  }
+
+  if (targetQty > available) {
+    throw new AppError({
+      code: 'INSUFFICIENT_STOCK',
+      message:
+        currentQty > 0
+          ? `Ya tenés ${currentQty} u. en tu carrito y solo hay ${available} u. disponibles en stock.`
+          : `Solo quedan ${available} unidades disponibles de este producto.`,
+    });
+  }
+
+  const { error } = await admin.from('cart_items').upsert(
+    {
+      cart_id: cartId,
+      variant_id: params.variantId,
+      quantity: targetQty,
+    },
+    { onConflict: 'cart_id,variant_id' }
+  );
+
+  if (error) {
+    throw new AppError({
+      code: 'INTERNAL_ERROR',
+      message: 'No se pudo agregar el producto al carrito.',
+    });
+  }
+
+  return getActiveCartDetailed();
+}
+
+/**
+ * Fija la cantidad exacta de una variante en el carrito (controles +/-) o la elimina si quantity === 0.
+ */
 export async function upsertCartItemServer(params: {
   variantId: string;
   quantity: number;
-}): Promise<{ cartId: string }> {
-  if (params.quantity < 0 || params.quantity > 50) {
+}): Promise<CartDetailedView> {
+  if (
+    !Number.isSafeInteger(params.quantity) ||
+    params.quantity < 0 ||
+    params.quantity > 50
+  ) {
     throw new AppError({
       code: 'VALIDATION_ERROR',
       message: 'Cantidad de producto fuera de rango permitido.',
     });
   }
 
-  const admin = createSupabaseAdminClient();
-  const profile = await getCurrentProfile();
-
-  let cartId: string;
-
-  if (profile) {
-    const { data: existing } = await admin
-      .from('carts')
-      .select('id')
-      .eq('user_id', profile.id)
-      .limit(1)
-      .maybeSingle();
-
-    if (existing) {
-      cartId = existing.id;
-    } else {
-      const { data: created, error } = await admin
-        .from('carts')
-        .insert({ user_id: profile.id })
-        .select('id')
-        .single();
-      if (error || !created) {
-        throw new AppError({
-          code: 'INTERNAL_ERROR',
-          message: 'No se pudo inicializar el carrito.',
-        });
-      }
-      cartId = created.id;
-    }
-  } else {
-    const { tokenHash } = await getOrCreateGuestCartToken();
-    const { data: existing } = await admin
-      .from('carts')
-      .select('id')
-      .eq('guest_token_hash', tokenHash)
-      .maybeSingle();
-
-    if (existing) {
-      cartId = existing.id;
-    } else {
-      const { data: created, error } = await admin
-        .from('carts')
-        .insert({ guest_token_hash: tokenHash })
-        .select('id')
-        .single();
-      if (error || !created) {
-        throw new AppError({
-          code: 'INTERNAL_ERROR',
-          message: 'No se pudo inicializar el carrito de invitado.',
-        });
-      }
-      cartId = created.id;
-    }
+  const cartId = await resolveOrCreateActiveCartId(true);
+  if (!cartId) {
+    throw new AppError({
+      code: 'INTERNAL_ERROR',
+      message: 'No se pudo acceder al servicio de carrito.',
+    });
   }
+
+  const admin = createSupabaseAdminClient();
 
   if (params.quantity === 0) {
     await admin
@@ -326,10 +432,9 @@ export async function upsertCartItemServer(params: {
       .delete()
       .eq('cart_id', cartId)
       .eq('variant_id', params.variantId);
-    return { cartId };
+    return getActiveCartDetailed();
   }
 
-  // Verificar stock disponible real en servidor antes de agregar
   const { data: inv } = await admin
     .from('inventory_levels')
     .select('available')
@@ -360,5 +465,5 @@ export async function upsertCartItemServer(params: {
     });
   }
 
-  return { cartId };
+  return getActiveCartDetailed();
 }

@@ -85,7 +85,7 @@ export function Footer() {
             </ul>
           </div>
 
-          {/* Columna 3: Atención y Cuenta */}
+          {/* Columna 3: Atención y Cuenta (sin enlaces administrativos expuestos a clientes) */}
           <div>
             <h3 className="text-sm font-semibold uppercase tracking-wider text-white">
               Mi Compra
@@ -96,7 +96,7 @@ export function Footer() {
                   href="/cuenta"
                   className="hover:text-[#7B19EC] transition-colors"
                 >
-                  Mi Cuenta y Pedidos
+                  Mi Cuenta y Mis Pedidos
                 </Link>
               </li>
               <li>
@@ -109,10 +109,10 @@ export function Footer() {
               </li>
               <li>
                 <Link
-                  href="/admin"
-                  className="hover:text-[#7B19EC] transition-colors text-neutral-400"
+                  href="/login"
+                  className="hover:text-[#7B19EC] transition-colors"
                 >
-                  Acceso Administración
+                  Iniciar Sesión / Registrarse
                 </Link>
               </li>
             </ul>

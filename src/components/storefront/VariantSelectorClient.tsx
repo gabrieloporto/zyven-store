@@ -1,17 +1,17 @@
 'use client';
 
-import { useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
-import { ShoppingBag, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { useState } from 'react';
+import { ShoppingBag, Plus, Minus } from 'lucide-react';
 import { formatArs } from '@/lib/money';
-import { updateCartItemQuantityAction } from '@/modules/cart/actions';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { useCart } from './CartProvider';
 
 export interface ClientVariantOption {
   id: string;
   sku: string;
   title: string;
+  optionValues: Record<string, string>;
   effectivePriceCentavos: number;
   compareAtPriceCentavos: number | null;
   discountPercentage: number | null;
@@ -21,47 +21,77 @@ export interface ClientVariantOption {
 
 export function VariantSelectorClient({
   variants,
+  optionNames = [],
+  selectedVariantId,
+  onSelectVariant,
 }: {
   variants: ReadonlyArray<ClientVariantOption>;
+  optionNames?: ReadonlyArray<string>;
+  selectedVariantId?: string;
+  onSelectVariant?: (variantId: string) => void;
 }) {
-  const router = useRouter();
-  const [selectedId, setSelectedId] = useState<string>(variants[0]?.id ?? '');
+  const { addItem, isPending } = useCart();
+  const [internalSelectedId, setInternalSelectedId] = useState<string>(
+    variants[0]?.id ?? ''
+  );
   const [quantity, setQuantity] = useState<number>(1);
-  const [feedback, setFeedback] = useState<{
-    type: 'ok' | 'error';
-    text: string;
-  } | null>(null);
-  const [isPending, startTransition] = useTransition();
 
+  const activeId = selectedVariantId ?? internalSelectedId;
   const selected =
-    variants.find((v) => v.id === selectedId) ?? variants[0] ?? null;
+    variants.find((v) => v.id === activeId) ?? variants[0] ?? null;
 
   if (!selected) return null;
 
   const inStock = selected.availableStock > 0;
 
-  function handleAddToCart() {
-    if (!selected) return;
-    setFeedback(null);
-
-    startTransition(async () => {
-      const res = await updateCartItemQuantityAction({
-        variantId: selected.id,
-        quantity,
-      });
-
-      if (!res.ok) {
-        setFeedback({ type: 'error', text: res.error.message });
-        return;
-      }
-
-      setFeedback({
-        type: 'ok',
-        text: 'Producto agregado a tu carrito.',
-      });
-      router.refresh();
-    });
+  function selectVariant(id: string) {
+    setInternalSelectedId(id);
+    onSelectVariant?.(id);
+    setQuantity(1);
   }
+
+  function handleOptionAxisClick(axisName: string, value: string) {
+    if (!selected) return;
+    const desiredOptions = {
+      ...selected.optionValues,
+      [axisName]: value,
+    };
+
+    // Buscar variante que coincida con todos los ejes deseados o al menos con el eje recién elegido
+    const exactMatch = variants.find((v) =>
+      Object.entries(desiredOptions).every(
+        ([k, val]) => v.optionValues[k] === val
+      )
+    );
+    const partialMatch = variants.find(
+      (v) => v.optionValues[axisName] === value
+    );
+
+    const target = exactMatch ?? partialMatch;
+    if (target) {
+      selectVariant(target.id);
+    }
+  }
+
+  async function handleAddToCart() {
+    if (!selected || !inStock) return;
+    await addItem(selected.id, quantity, { openModal: true });
+    setQuantity(1);
+  }
+
+  // Extraer valores únicos por eje (ej. Color: [Negro, Blanco...], Talle: [M, L...])
+  const axesWithValues = optionNames
+    .map((axis) => {
+      const values = Array.from(
+        new Set(
+          variants
+            .map((v) => v.optionValues[axis])
+            .filter((val): val is string => Boolean(val))
+        )
+      );
+      return { axis, values };
+    })
+    .filter((a) => a.values.length > 0);
 
   return (
     <div className="space-y-6">
@@ -72,7 +102,9 @@ export function VariantSelectorClient({
             SKU: {selected.sku}
           </span>
           {inStock ? (
-            <Badge variant="success">En stock ({selected.availableStock} disp.)</Badge>
+            <Badge variant="success">
+              En stock ({selected.availableStock} disp.)
+            </Badge>
           ) : (
             <Badge variant="secondary">Sin stock disponible</Badge>
           )}
@@ -96,8 +128,42 @@ export function VariantSelectorClient({
         </div>
       </div>
 
-      {/* Selector de variantes cuando hay más de una */}
-      {variants.length > 1 ? (
+      {/* Selector por ejes (Color, Talle, Tipo de conector) cuando están definidos */}
+      {axesWithValues.length > 0 ? (
+        <div className="space-y-4">
+          {axesWithValues.map(({ axis, values }) => (
+            <div key={axis} className="space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold uppercase tracking-wider text-neutral-600">
+                  {axis}:{' '}
+                  <strong className="text-[#111111]">
+                    {selected.optionValues[axis] ?? selected.title}
+                  </strong>
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {values.map((val) => {
+                  const isSelected = selected.optionValues[axis] === val;
+                  return (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => handleOptionAxisClick(axis, val)}
+                      className={`rounded-xl border px-4 py-2 text-sm font-semibold transition-all cursor-pointer ${
+                        isSelected
+                          ? 'border-[#7B19EC] bg-[#F3E8FF] text-[#7B19EC]'
+                          : 'border-neutral-200 bg-white text-[#111111] hover:border-neutral-400'
+                      }`}
+                    >
+                      {val}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : variants.length > 1 ? (
         <div className="space-y-2.5">
           <label className="text-xs font-bold uppercase tracking-wider text-neutral-600">
             Seleccionar variante
@@ -109,11 +175,7 @@ export function VariantSelectorClient({
                 <button
                   key={variant.id}
                   type="button"
-                  onClick={() => {
-                    setSelectedId(variant.id);
-                    setQuantity(1);
-                    setFeedback(null);
-                  }}
+                  onClick={() => selectVariant(variant.id)}
                   className={`rounded-xl border px-4 py-2 text-sm font-semibold transition-all cursor-pointer ${
                     isSelected
                       ? 'border-[#7B19EC] bg-[#F3E8FF] text-[#7B19EC]'
@@ -128,31 +190,33 @@ export function VariantSelectorClient({
         </div>
       ) : null}
 
-      {/* Cantidad y botón de compra */}
+      {/* Cantidad +/- y botón de compra (abre el modal de previsualización) */}
       <div className="flex flex-col gap-3 sm:flex-row">
-        <div className="flex items-center rounded-lg border border-neutral-300 bg-white">
+        <div className="inline-flex h-12 items-center justify-between rounded-lg border border-neutral-300 bg-white sm:justify-start">
           <button
             type="button"
-            disabled={!inStock || quantity <= 1}
+            disabled={!inStock || quantity <= 1 || isPending}
             onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-            className="h-12 px-4 text-lg font-bold text-[#111111] disabled:opacity-40 cursor-pointer"
+            className="flex h-full px-4 items-center justify-center text-[#111111] transition-colors hover:bg-neutral-100 disabled:opacity-40 cursor-pointer"
             aria-label="Disminuir cantidad"
           >
-            −
+            <Minus className="h-4 w-4" />
           </button>
-          <span className="w-12 text-center font-mono text-sm font-semibold">
+          <span className="w-12 text-center font-mono text-sm font-bold">
             {quantity}
           </span>
           <button
             type="button"
-            disabled={!inStock || quantity >= selected.availableStock}
+            disabled={
+              !inStock || quantity >= selected.availableStock || isPending
+            }
             onClick={() =>
               setQuantity((q) => Math.min(selected.availableStock, q + 1))
             }
-            className="h-12 px-4 text-lg font-bold text-[#111111] disabled:opacity-40 cursor-pointer"
+            className="flex h-full px-4 items-center justify-center text-[#111111] transition-colors hover:bg-neutral-100 disabled:opacity-40 cursor-pointer"
             aria-label="Aumentar cantidad"
           >
-            +
+            <Plus className="h-4 w-4" />
           </button>
         </div>
 
@@ -171,24 +235,6 @@ export function VariantSelectorClient({
               : 'Sin stock'}
         </Button>
       </div>
-
-      {feedback ? (
-        <div
-          role="status"
-          className={`flex items-center gap-2 rounded-xl border p-3.5 text-sm ${
-            feedback.type === 'ok'
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-              : 'border-red-200 bg-red-50 text-red-700'
-          }`}
-        >
-          {feedback.type === 'ok' ? (
-            <CheckCircle2 className="h-4 w-4 shrink-0" />
-          ) : (
-            <AlertTriangle className="h-4 w-4 shrink-0" />
-          )}
-          <span>{feedback.text}</span>
-        </div>
-      ) : null}
     </div>
   );
 }

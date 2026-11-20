@@ -1,15 +1,11 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import Image from 'next/image';
 import Link from 'next/link';
-import { Package, ShieldCheck, Truck, Info } from 'lucide-react';
 import { getActiveProductDetailBySlug } from '@/modules/products/queries';
 import { resolveEffectivePriceCentavos, centavosToPesosNumber } from '@/lib/money';
-import {
-  VariantSelectorClient,
-  type ClientVariantOption,
-} from '@/components/storefront/VariantSelectorClient';
-import { Badge } from '@/components/ui/badge';
+import type { ClientVariantOption } from '@/components/storefront/VariantSelectorClient';
+import type { CarouselImageItem } from '@/components/storefront/ProductImageCarousel';
+import { ProductDetailInteractive } from '@/components/storefront/ProductDetailInteractive';
 
 export async function generateMetadata({
   params,
@@ -44,7 +40,9 @@ export default async function ProductDetailPage({
   }
 
   const rawVariants = Array.isArray(product.product_variants)
-    ? product.product_variants.filter((v) => v.status === 'active')
+    ? [...product.product_variants]
+        .filter((v) => v.status === 'active')
+        .sort((a, b) => Number(b.is_default) - Number(a.is_default))
     : [];
 
   if (rawVariants.length === 0) {
@@ -64,10 +62,20 @@ export default async function ProductDetailPage({
       promoEndsAt: v.promo_ends_at,
     });
 
+    const optValues: Record<string, string> = {};
+    if (v.option_values && typeof v.option_values === 'object') {
+      for (const [key, val] of Object.entries(
+        v.option_values as Record<string, unknown>
+      )) {
+        if (val != null) optValues[key] = String(val);
+      }
+    }
+
     return {
       id: v.id,
       sku: v.sku,
       title: v.title,
+      optionValues: optValues,
       effectivePriceCentavos: priceInfo.effectivePriceCentavos,
       compareAtPriceCentavos: priceInfo.compareAtPriceCentavos,
       discountPercentage: priceInfo.discountPercentage,
@@ -76,10 +84,18 @@ export default async function ProductDetailPage({
     };
   });
 
-  const images = Array.isArray(product.product_images)
-    ? product.product_images
+  const rawImages = Array.isArray(product.product_images)
+    ? [...product.product_images].sort((a, b) => a.sort_order - b.sort_order)
     : [];
-  const primaryImage = images.find((i) => i.is_primary) ?? images[0] ?? null;
+
+  const carouselImages: CarouselImageItem[] = rawImages.map((img) => ({
+    id: img.id,
+    variantId: img.variant_id,
+    publicUrl: img.public_url,
+    altText: img.alt_text || product.name,
+    isPrimary: img.is_primary,
+    sortOrder: img.sort_order,
+  }));
 
   const category = Array.isArray(product.categories)
     ? product.categories[0]
@@ -93,13 +109,17 @@ export default async function ProductDetailPage({
       ? (product.attributes as Record<string, unknown>)
       : {};
 
+  const optionNames = Array.isArray(product.option_names)
+    ? product.option_names.map((n) => String(n))
+    : [];
+
   const firstVariant = clientVariants[0]!;
 
-  // Datos estructurados JSON-LD (Schema.org Product en ARS)
   const jsonLd = {
     '@context': 'https://schema.org',
     '@type': 'Product',
     name: product.name,
+    image: carouselImages.map((i) => i.publicUrl),
     description: product.short_description ?? product.description ?? product.name,
     sku: firstVariant.sku,
     brand: brand ? { '@type': 'Brand', name: brand.name } : undefined,
@@ -142,98 +162,18 @@ export default async function ProductDetailPage({
         ) : null}
       </nav>
 
-      <div className="grid grid-cols-1 gap-10 lg:grid-cols-2">
-        {/* Galería de imágenes */}
-        <div className="relative aspect-square overflow-hidden rounded-2xl border border-neutral-200 bg-neutral-50">
-          {primaryImage ? (
-            <Image
-              src={primaryImage.public_url}
-              alt={primaryImage.alt_text || product.name}
-              fill
-              priority
-              sizes="(max-width: 1024px) 100vw, 50vw"
-              className="object-cover"
-            />
-          ) : (
-            <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-neutral-400">
-              <Package className="h-16 w-16 text-neutral-300" />
-              <span className="text-sm font-medium">{product.name}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Información comercial y selector de variantes */}
-        <div className="space-y-6">
-          <div>
-            <div className="flex items-center gap-2">
-              {brand ? (
-                <Badge variant="violetSoft">{brand.name}</Badge>
-              ) : null}
-              {category ? (
-                <Badge variant="secondary">{category.name}</Badge>
-              ) : null}
-            </div>
-            <h1 className="mt-3 text-2xl font-bold tracking-tight text-[#111111] sm:text-3xl">
-              {product.name}
-            </h1>
-            {product.short_description ? (
-              <p className="mt-2 text-sm text-neutral-600">
-                {product.short_description}
-              </p>
-            ) : null}
-          </div>
-
-          <VariantSelectorClient variants={clientVariants} />
-
-          {/* Avisos logísticos de transporte (Sección 10) */}
-          {product.contains_flammable_liquid ||
-          product.contains_lithium_battery ? (
-            <div className="flex items-start gap-2.5 rounded-xl border border-neutral-200 bg-neutral-50 p-3.5 text-xs text-neutral-600">
-              <Info className="mt-0.5 h-4 w-4 shrink-0 text-[#7B19EC]" />
-              <span>
-                Este artículo cuenta con embalaje protector reforzado y se
-                despacha exclusivamente mediante modalidades terrestres
-                habilitadas desde nuestro depósito en Alejandro Korn.
-              </span>
-            </div>
-          ) : null}
-
-          <div className="grid grid-cols-1 gap-3 border-t border-neutral-200 pt-5 text-xs text-neutral-600 sm:grid-cols-2">
-            <div className="flex items-center gap-2">
-              <Truck className="h-4 w-4 text-[#7B19EC]" />
-              <span>Despacho directo desde Alejandro Korn (CP 1864)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-[#7B19EC]" />
-              <span>Compra protegida con Mercado Pago</span>
-            </div>
-          </div>
-
-          {/* Atributos flexibles del rubro (JSONB) */}
-          {Object.keys(attributesObj).length > 0 ? (
-            <div className="rounded-2xl border border-neutral-200 bg-white p-5">
-              <h2 className="text-sm font-bold uppercase tracking-wider text-[#111111]">
-                Especificaciones del producto
-              </h2>
-              <dl className="mt-3 divide-y divide-neutral-100 text-sm">
-                {Object.entries(attributesObj).map(([k, v]) => (
-                  <div
-                    key={k}
-                    className="flex items-center justify-between py-2"
-                  >
-                    <dt className="capitalize text-neutral-500">
-                      {k.replace(/_/g, ' ')}
-                    </dt>
-                    <dd className="font-medium text-[#111111]">
-                      {typeof v === 'boolean' ? (v ? 'Sí' : 'No') : String(v)}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            </div>
-          ) : null}
-        </div>
-      </div>
+      <ProductDetailInteractive
+        productName={product.name}
+        shortDescription={product.short_description}
+        brandName={brand?.name ?? null}
+        categoryName={category?.name ?? null}
+        containsFlammableLiquid={product.contains_flammable_liquid}
+        containsLithiumBattery={product.contains_lithium_battery}
+        attributes={attributesObj}
+        optionNames={optionNames}
+        variants={clientVariants}
+        images={carouselImages}
+      />
     </div>
   );
 }
