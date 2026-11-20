@@ -3,6 +3,10 @@ import sharp from 'sharp';
 import { upsertProductSchema, upsertVariantSchema } from '@/modules/products/schema';
 import { optimizeProductImageToWebp } from '@/modules/products/image-optimizer';
 import { computeNewOnHandAfterAdjustment } from '@/modules/inventory/schema';
+import {
+  resolveImageIndexForVariant,
+  type CarouselImageItem,
+} from '@/components/storefront/ProductImageCarousel';
 
 describe('products & inventory — Catálogo, variantes, imágenes WebP y control de stock', () => {
   it('impide publicar un producto si commercialNameConfirmed es false (Sección 26.D)', () => {
@@ -102,5 +106,40 @@ describe('products & inventory — Catálogo, variantes, imágenes WebP y contro
     });
     expect(validOut.newOnHand).toBe(2);
     expect(validOut.quantityDelta).toBe(-1);
+  });
+
+  it('sincroniza el carrusel de imágenes al seleccionar una variante con foto propia (Punto 7)', () => {
+    const images: CarouselImageItem[] = [
+      {
+        id: 'img-1',
+        variantId: 'var-blk',
+        publicUrl: '/products/technology/Parlante Bluetooth portátil JBL GO 4 Negro.webp',
+        altText: 'JBL GO 4 Negro',
+        isPrimary: true,
+        sortOrder: 0,
+      },
+      {
+        id: 'img-2',
+        variantId: 'var-red',
+        publicUrl: '/products/technology/Parlante Bluetooth portátil JBL GO 4 Rojo.webp',
+        altText: 'JBL GO 4 Rojo',
+        isPrimary: false,
+        sortOrder: 1,
+      },
+      {
+        id: 'img-3',
+        variantId: null,
+        publicUrl: '/products/clothing/Remera Nike Pro Dri-FIT Tight Top Espalda.webp',
+        altText: 'Espalda',
+        isPrimary: false,
+        sortOrder: 2,
+      },
+    ];
+
+    // Al seleccionar la variante Roja ('var-red'), el carrusel salta al índice 1
+    expect(resolveImageIndexForVariant(images, 'var-red', 0)).toBe(1);
+
+    // Si la variante no tiene imagen específica (ej. talle en remera con fotos de frente y espalda), conserva el índice actual
+    expect(resolveImageIndexForVariant(images, 'var-size-m', 2)).toBe(2);
   });
 });
