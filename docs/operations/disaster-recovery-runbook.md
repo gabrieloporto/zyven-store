@@ -1,33 +1,37 @@
 # Manual de Recuperación ante Desastres y Backups — Zyven Store (Sección 17)
 
-## 1. Alcance y Objetivo (RPO ≤ 24 horas)
+## 1. Configuración Obligatoria en GitHub Secrets
 
-Dado que Zyven Store utiliza inicialmente el **Plan Gratuito de Supabase** ($0/mes, el cual no ofrece backups descargables de plataforma ni Point-in-Time Recovery) y **Cloudflare R2 fue descartado**, el respaldo se realiza de manera automatizada y sin costos recurrentes mediante GitHub Actions (`.github/workflows/backup-db.yml`) y utilidades criptográficas (`src/lib/backup/crypto-archive.ts`).
+Para que el workflow diario [backup-db.yml](file:///c:/Programacion/zyven-store/.github/workflows/backup-db.yml) funcione en **GitHub → Settings → Secrets and variables → Actions**, debés crear 2 secretos:
 
-### ¿Qué se respalda?
-1. **Base de datos PostgreSQL (`esquema public` completo):** Catálogo, variantes, niveles y movimientos de inventario, órdenes, snapshots de ítems, pagos, reembolsos, metadatos de facturación, devoluciones y auditoría (`audit_logs`).
-2. **Archivos privados de Supabase Storage (`billing-documents` y `return-evidence`):** Los comprobantes PDF emitidos nunca se sobrescriben y su hash `file_sha256` queda registrado en `public.billing_documents`.
+1. **`SUPABASE_DB_URL`:**
+   - En tu proyecto de Supabase (`rtvbaievydfsazpefnum`), ir a **Connect → Session pooler** y copiar la URI (`postgresql://postgres.rtvbaievydfsazpefnum:[TU-PASSWORD]@aws-0-sa-east-1.pooler.supabase.com:5432/postgres`).
+   - *Importante:* Usar siempre **Session pooler** (IPv4) y no *Direct connection* (IPv6-only en el plan gratuito), porque los runners de GitHub Actions operan sobre IPv4.
+2. **`BACKUP_ENCRYPTION_KEY`:**
+   - Una frase secreta fuerte de al menos 24–32 caracteres guardada en tu gestor de contraseñas. Sin esta clave el archivo `.sql.enc` no puede descifrarse.
 
-### ¿Dónde se almacena y cómo se cifra?
-- Todo backup se cifra antes de abandonar el entorno de ejecución mediante **AES-256-GCM autenticado** con derivación de clave **PBKDF2-SHA256 (120.000 iteraciones)** usando el secreto `BACKUP_ENCRYPTION_KEY`.
-- Se almacena como **GitHub Actions Artifact privado** con retención de **30 días** (nunca se comitea en el repositorio Git ni se expone públicamente).
+## 2. Qué se respalda y cómo se cifra (RPO ≤ 24 h)
 
-### Limitaciones documentadas del Plan Gratuito
-- **Ventana de pérdida máxima (RPO):** Hasta 24 horas entre ejecuciones automáticas diarias (se recomienda disparar manualmente el workflow `Backup Diario Cifrado` tras jornadas de alto volumen o cargas masivas de facturación).
-- **Credenciales de Auth (`auth.users`):** Las contraseñas hasheadas en `auth.users` pueden incluirse agregando `--schema=auth` al `pg_dump` con la cadena de conexión de pooler en modo sesión.
+- **Base de datos PostgreSQL (`esquema public`):** Exportada con `pg_dump` v17 (`--no-owner --no-acl`).
+- **Cifrado autenticado:** `AES-256-GCM` con derivación `PBKDF2-SHA256` (120.000 iteraciones) y verificación inmediata de descifrado + hash `SHA-256` antes de eliminar el SQL en texto plano.
+- **Almacenamiento ($0, sin Cloudflare R2):** Artefacto privado de GitHub Actions con retención de **30 días**.
 
-## 2. Procedimiento de Restauración Verificado
+## 3. Procedimiento de Restauración
 
-1. Descargar el artefacto cifrado `.sql.enc` desde la pestaña **Actions → Backup Diario Cifrado** de GitHub.
-2. Descifrar y verificar autenticidad localmente:
+1. Descargar el artefacto `zyven-encrypted-db-backup-<run_id>` desde la pestaña **Actions** de GitHub.
+2. Descifrar con Node.js usando `BACKUP_ENCRYPTION_KEY`:
    ```bash
-   openssl enc -d -aes-256-gcm -pbkdf2 -iter 120000 \
-     -in zyven-db-FECHA.sql.enc \
-     -out restore.sql \
-     -pass env:BACKUP_ENCRYPTION_KEY
+   node -e '
+     const fs = require("fs");
+     const crypto = require("crypto");
+     const buf = fs.readFileSync("zyven-db-FECHA.sql.enc");
+     const key = crypto.pbkdf2Sync(process.env.BACKUP_ENCRYPTION_KEY, buf.subarray(9, 25), 120000, 32, "sha256");
+     const dec = crypto.createDecipheriv("aes-256-gcm", key, buf.subarray(25, 37));
+     dec.setAuthTag(buf.subarray(37, 53));
+     fs.writeFileSync("restore.sql", Buffer.concat([dec.update(buf.subarray(53)), dec.final()]));
+   '
    ```
-3. Aplicar sobre la instancia PostgreSQL destino:
+3. Restaurar en PostgreSQL:
    ```bash
    psql "$TARGET_DATABASE_URL" -f restore.sql
    ```
-4. Verificar conteo de órdenes, cuadratura de `inventory_levels` (`on_hand >= reserved`) y hashes SHA-256 de `billing_documents`.
