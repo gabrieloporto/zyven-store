@@ -53,7 +53,8 @@ jobs:
           RAW_FILE="backups/zyven-db-${TIMESTAMP}.sql"
           ENC_FILE="backups/zyven-db-${TIMESTAMP}.sql.enc"
 
-          pg_dump "$SUPABASE_DB_URL" \
+          /usr/lib/postgresql/17/bin/pg_dump --version
+          /usr/lib/postgresql/17/bin/pg_dump "$SUPABASE_DB_URL" \
             --no-owner \
             --no-acl \
             --schema=public \
