@@ -1,5 +1,7 @@
+import Link from 'next/link';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { Badge } from '@/components/ui/badge';
+import { InventoryRowAdjustmentClient } from '@/components/admin/InventoryRowAdjustmentClient';
 
 export default async function AdminInventoryPage() {
   const supabase = await createSupabaseServerClient();
@@ -14,7 +16,7 @@ export default async function AdminInventoryPage() {
       available,
       low_stock_threshold,
       updated_at,
-      product_variants(sku, title, products(name))
+      product_variants(sku, title, product_id, products(id, name))
     `
     )
     .order('available', { ascending: true });
@@ -27,7 +29,8 @@ export default async function AdminInventoryPage() {
         </h1>
         <p className="text-sm text-neutral-600">
           Depósito Único: Alejandro Korn (CP 1864). Invariante transaccional
-          activo: <code>on_hand &gt;= reserved</code>.
+          activo: <code>on_hand &gt;= reserved</code>. Cada ajuste queda
+          registrado en <code>inventory_movements</code>.
         </p>
       </div>
 
@@ -40,7 +43,8 @@ export default async function AdminInventoryPage() {
               <th className="py-3.5 px-4 text-right">Físico (on_hand)</th>
               <th className="py-3.5 px-4 text-right">Reservado</th>
               <th className="py-3.5 px-4 text-right">Disponible</th>
-              <th className="py-3.5 pl-4 pr-5">Alerta</th>
+              <th className="py-3.5 px-4">Alerta</th>
+              <th className="py-3.5 pl-4 pr-5 text-right">Ajuste</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-200">
@@ -62,9 +66,16 @@ export default async function AdminInventoryPage() {
                     {pv?.sku ?? '—'}
                   </td>
                   <td className="py-3.5 px-4">
-                    <span className="font-semibold text-[#111111]">
-                      {prod?.name ?? '—'}
-                    </span>{' '}
+                    {prod?.id ? (
+                      <Link
+                        href={`/admin/productos/${prod.id}`}
+                        className="font-semibold text-[#111111] hover:text-[#7B19EC] hover:underline"
+                      >
+                        {prod.name}
+                      </Link>
+                    ) : (
+                      <span className="font-semibold text-[#111111]">—</span>
+                    )}{' '}
                     <span className="text-xs text-neutral-500">
                       ({pv?.title ?? ''})
                     </span>
@@ -78,7 +89,7 @@ export default async function AdminInventoryPage() {
                   <td className="py-3.5 px-4 text-right font-mono font-bold">
                     {available}
                   </td>
-                  <td className="py-3.5 pl-4 pr-5">
+                  <td className="py-3.5 px-4">
                     {available === 0 ? (
                       <Badge variant="destructive">Sin stock</Badge>
                     ) : isLow ? (
@@ -86,6 +97,15 @@ export default async function AdminInventoryPage() {
                     ) : (
                       <Badge variant="success">OK</Badge>
                     )}
+                  </td>
+                  <td className="py-3.5 pl-4 pr-5 text-right">
+                    <div className="flex justify-end">
+                      <InventoryRowAdjustmentClient
+                        variantId={row.variant_id}
+                        sku={pv?.sku ?? ''}
+                        lowStockThreshold={row.low_stock_threshold}
+                      />
+                    </div>
                   </td>
                 </tr>
               );

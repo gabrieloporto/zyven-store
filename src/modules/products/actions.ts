@@ -287,7 +287,9 @@ export async function recordInventoryAdjustmentAction(
       metadata: { reason: d.reason, quantityDelta: calc.quantityDelta },
     });
 
-    revalidatePath('/productos');
+    revalidatePath('/');
+    revalidatePath('/productos', 'layout');
+    revalidatePath('/admin/productos', 'layout');
     revalidatePath('/admin/inventario');
     revalidatePath('/admin');
 
@@ -458,6 +460,7 @@ export async function uploadProductImageAction(formData: FormData): Promise<
     revalidatePath('/');
     revalidatePath('/productos');
     revalidatePath('/admin/productos');
+    revalidatePath(`/admin/productos/${productId}`);
 
     return ok({ imageId: createdImg.id, publicUrl });
   } catch (err) {
@@ -763,6 +766,818 @@ export async function createCompleteProductAction(
     revalidatePath('/admin');
 
     return ok({ productId: createdProduct.id, slug: createdProduct.slug });
+  } catch (err) {
+    return toActionError(err);
+  }
+}
+
+async function syncProductVariantMetadata(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  productId: string
+): Promise<void> {
+  const { data: variants } = await admin
+    .from('product_variants')
+    .select('id, status, option_values')
+    .eq('product_id', productId)
+    .neq('status', 'archived');
+
+  const activeList = variants ?? [];
+  const preferredOrder = ['Talle', 'Color', 'Conector'];
+  const keysSet = new Set<string>();
+
+  for (const v of activeList) {
+    const ov = v.option_values;
+    if (ov && typeof ov === 'object' && !Array.isArray(ov)) {
+      for (const [k, val] of Object.entries(ov)) {
+        if (typeof val === 'string' && val.trim().length > 0) {
+          keysSet.add(k);
+        }
+      }
+    }
+  }
+
+  const orderedKeys = [
+    ...preferredOrder.filter((k) => keysSet.has(k)),
+    ...[...keysSet].filter((k) => !preferredOrder.includes(k)),
+  ];
+
+  await admin
+    .from('products')
+    .update({
+      has_variants: activeList.length > 1 || orderedKeys.length > 0,
+      option_names: orderedKeys as unknown as Json,
+    })
+    .eq('id', productId);
+}
+
+export async function updateProductDetailsAction(input: {
+  productId: string;
+  name: string;
+  slug: string;
+  categoryId: string;
+  brandId: string | null;
+  newBrandName?: string;
+  shortDescription?: string;
+  description?: string;
+  status: 'draft' | 'active' | 'archived';
+  isFeatured: boolean;
+  containsFlammableLiquid: boolean;
+  containsLithiumBattery: boolean;
+  lithiumBatteryType: 'none' | 'contained_in_equipment' | 'standalone_powerbank';
+}): Promise<ActionResult<{ productId: string; slug: string }>> {
+  try {
+    const adminProfile = await requireAdminProfile();
+    const admin = createSupabaseAdminClient();
+
+    const name = input.name.trim();
+    const slug = slugify(input.slug.trim() || name);
+    const categoryId = input.categoryId.trim();
+
+    if (name.length < 3 || !slug || !categoryId) {
+      return fail(
+        'VALIDATION_ERROR',
+        'Completá el nombre comercial, slug y categoría válidos.'
+      );
+    }
+
+    const { data: existing, error: fetchErr } = await admin
+      .from('products')
+      .select('id, slug, status')
+      .eq('id', input.productId)
+      .single();
+
+    if (fetchErr || !existing) {
+      return fail('NOT_FOUND', 'Producto no encontrado.');
+    }
+
+    let resolvedBrandId: string | null = input.brandId?.trim() || null;
+    const newBrandName = (input.newBrandName ?? '').trim();
+    if (!resolvedBrandId && newBrandName.length >= 2) {
+      const brandSlug = slugify(newBrandName);
+      const { data: existingBrand } = await admin
+        .from('brands')
+        .select('id')
+        .eq('slug', brandSlug)
+        .maybeSingle();
+
+      if (existingBrand) {
+        resolvedBrandId = existingBrand.id;
+      } else {
+        const { data: createdBrand, error: brandErr } = await admin
+          .from('brands')
+          .insert({ name: newBrandName, slug: brandSlug, is_active: true })
+          .select('id')
+          .single();
+
+        if (brandErr || !createdBrand) {
+          return fail(
+            'CONFLICT',
+            `No se pudo crear la marca "${newBrandName}": ${brandErr?.message ?? ''}`
+          );
+        }
+        resolvedBrandId = createdBrand.id;
+      }
+    }
+
+    const lithiumBatteryType = input.containsLithiumBattery
+      ? input.lithiumBatteryType === 'standalone_powerbank'
+        ? 'standalone_powerbank'
+        : 'contained_in_equipment'
+      : 'none';
+
+    const payload = {
+      name,
+      slug,
+      category_id: categoryId,
+      brand_id: resolvedBrandId,
+      short_description: input.shortDescription?.trim() || null,
+      description: input.description?.trim() || null,
+      status: input.status,
+      is_featured: input.isFeatured,
+      contains_flammable_liquid: input.containsFlammableLiquid,
+      contains_lithium_battery: input.containsLithiumBattery,
+      lithium_battery_type: lithiumBatteryType,
+      requires_special_packaging:
+        input.containsFlammableLiquid || input.containsLithiumBattery,
+      commercial_name_confirmed: true,
+    };
+
+    const { error: updErr } = await admin
+      .from('products')
+      .update(payload)
+      .eq('id', input.productId);
+
+    if (updErr) {
+      return fail(
+        'CONFLICT',
+        `No se pudo guardar el producto (verificá que el slug no esté duplicado): ${updErr.message}`
+      );
+    }
+
+    await recordAuditLog({
+      actorUserId: adminProfile.id,
+      actorRole: adminProfile.role,
+      action: 'product.updated',
+      entityType: 'product',
+      entityId: input.productId,
+      beforeState: { slug: existing.slug, status: existing.status },
+      afterState: payload,
+    });
+
+    revalidatePath('/');
+    revalidatePath('/productos');
+    revalidatePath(`/productos/${existing.slug}`);
+    revalidatePath(`/productos/${slug}`);
+    revalidatePath('/admin/productos');
+    revalidatePath(`/admin/productos/${input.productId}`);
+    revalidatePath('/admin');
+
+    return ok({ productId: input.productId, slug });
+  } catch (err) {
+    return toActionError(err);
+  }
+}
+
+export async function saveProductVariantAction(input: {
+  id?: string;
+  productId: string;
+  sku: string;
+  title: string;
+  pricePesos: number;
+  promotionalPricePesos: number | null;
+  status: 'draft' | 'active' | 'archived';
+  weightGrams: number;
+  optionValues: Record<string, string>;
+  initialStock?: number;
+}): Promise<ActionResult<{ variantId: string }>> {
+  try {
+    const adminProfile = await requireAdminProfile();
+    const admin = createSupabaseAdminClient();
+
+    const normalizedSku = input.sku.trim().toUpperCase();
+    const title = input.title.trim();
+
+    if (normalizedSku.length < 3 || !/^[A-Z0-9-_]+$/.test(normalizedSku)) {
+      return fail(
+        'VALIDATION_ERROR',
+        'El SKU debe tener al menos 3 caracteres (solo letras mayúsculas, números, guiones o guiones bajos).'
+      );
+    }
+
+    if (!title) {
+      return fail('VALIDATION_ERROR', 'Ingresá un título para la variante.');
+    }
+
+    if (!Number.isFinite(input.pricePesos) || input.pricePesos <= 0) {
+      return fail('VALIDATION_ERROR', 'El precio regular debe ser mayor a $ 0.');
+    }
+
+    if (
+      input.promotionalPricePesos != null &&
+      (!Number.isFinite(input.promotionalPricePesos) ||
+        input.promotionalPricePesos <= 0 ||
+        input.promotionalPricePesos >= input.pricePesos)
+    ) {
+      return fail(
+        'VALIDATION_ERROR',
+        'El precio promocional debe ser mayor a $ 0 y menor al precio regular.'
+      );
+    }
+
+    const cleanOptionValues: Record<string, string> = {};
+    for (const [k, v] of Object.entries(input.optionValues ?? {})) {
+      const key = k.trim();
+      const val = v.trim();
+      if (key && val) {
+        cleanOptionValues[key] = val;
+      }
+    }
+
+    const priceCentavos = pesosToCentavos(input.pricePesos);
+    const promotionalPriceCentavos =
+      input.promotionalPricePesos != null
+        ? pesosToCentavos(input.promotionalPricePesos)
+        : null;
+    const weightGrams = Math.max(10, Math.round(input.weightGrams || 250));
+
+    let variantId = input.id;
+
+    if (variantId) {
+      const { error: updErr } = await admin
+        .from('product_variants')
+        .update({
+          sku: normalizedSku,
+          title,
+          status: input.status,
+          price_centavos: priceCentavos,
+          promotional_price_centavos: promotionalPriceCentavos,
+          option_values: cleanOptionValues as unknown as Json,
+          weight_grams: weightGrams,
+        })
+        .eq('id', variantId)
+        .eq('product_id', input.productId);
+
+      if (updErr) {
+        return fail(
+          'CONFLICT',
+          `No se pudo actualizar la variante (verificá que el SKU "${normalizedSku}" sea único): ${updErr.message}`
+        );
+      }
+    } else {
+      const initialStock = Math.max(0, Math.floor(input.initialStock ?? 0));
+
+      const { count } = await admin
+        .from('product_variants')
+        .select('id', { count: 'exact', head: true })
+        .eq('product_id', input.productId);
+
+      const { data: created, error: createErr } = await admin
+        .from('product_variants')
+        .insert({
+          product_id: input.productId,
+          sku: normalizedSku,
+          title,
+          is_default: (count ?? 0) === 0,
+          status: input.status,
+          price_centavos: priceCentavos,
+          promotional_price_centavos: promotionalPriceCentavos,
+          option_values: cleanOptionValues as unknown as Json,
+          weight_grams: weightGrams,
+          sort_order: (count ?? 0) + 1,
+        })
+        .select('id')
+        .single();
+
+      if (createErr || !created) {
+        return fail(
+          'CONFLICT',
+          `No se pudo crear la variante (verificá que el SKU "${normalizedSku}" sea único): ${createErr?.message ?? ''}`
+        );
+      }
+      variantId = created.id;
+
+      const { data: warehouse } = await admin
+        .from('warehouses')
+        .select('id')
+        .eq('code', 'ALEJANDRO_KORN')
+        .single();
+
+      if (warehouse) {
+        await admin.from('inventory_levels').insert({
+          variant_id: variantId,
+          warehouse_id: warehouse.id,
+          on_hand: initialStock,
+          reserved: 0,
+          low_stock_threshold: 2,
+        });
+
+        if (initialStock > 0) {
+          await admin.from('inventory_movements').insert({
+            variant_id: variantId,
+            warehouse_id: warehouse.id,
+            movement_type: 'purchase_entry',
+            quantity_delta: initialStock,
+            on_hand_before: 0,
+            on_hand_after: initialStock,
+            reserved_before: 0,
+            reserved_after: 0,
+            reference_type: 'manual_adjustment',
+            idempotency_key: `init-var:${variantId}`,
+            reason: 'Stock inicial al crear variante desde edición de producto',
+            actor_user_id: adminProfile.id,
+          });
+        }
+      }
+    }
+
+    await syncProductVariantMetadata(admin, input.productId);
+
+    const { data: prod } = await admin
+      .from('products')
+      .select('slug')
+      .eq('id', input.productId)
+      .single();
+
+    await recordAuditLog({
+      actorUserId: adminProfile.id,
+      actorRole: adminProfile.role,
+      action: input.id ? 'variant.updated' : 'variant.created',
+      entityType: 'product_variant',
+      entityId: variantId,
+      afterState: {
+        sku: normalizedSku,
+        title,
+        status: input.status,
+        priceCentavos,
+        promotionalPriceCentavos,
+        optionValues: cleanOptionValues,
+      },
+    });
+
+    revalidatePath('/');
+    revalidatePath('/productos');
+    if (prod?.slug) revalidatePath(`/productos/${prod.slug}`);
+    revalidatePath('/admin/productos');
+    revalidatePath(`/admin/productos/${input.productId}`);
+    revalidatePath('/admin/inventario');
+
+    return ok({ variantId });
+  } catch (err) {
+    return toActionError(err);
+  }
+}
+
+export async function toggleVariantStatusAction(input: {
+  productId: string;
+  variantId: string;
+  targetStatus: 'active' | 'archived';
+}): Promise<ActionResult<{ status: 'active' | 'archived' }>> {
+  try {
+    const adminProfile = await requireAdminProfile();
+    const admin = createSupabaseAdminClient();
+
+    const { error } = await admin
+      .from('product_variants')
+      .update({ status: input.targetStatus })
+      .eq('id', input.variantId)
+      .eq('product_id', input.productId);
+
+    if (error) {
+      return fail('CONFLICT', `No se pudo cambiar el estado de la variante: ${error.message}`);
+    }
+
+    await syncProductVariantMetadata(admin, input.productId);
+
+    const { data: prod } = await admin
+      .from('products')
+      .select('slug')
+      .eq('id', input.productId)
+      .single();
+
+    await recordAuditLog({
+      actorUserId: adminProfile.id,
+      actorRole: adminProfile.role,
+      action: 'variant.status_changed',
+      entityType: 'product_variant',
+      entityId: input.variantId,
+      afterState: { status: input.targetStatus },
+    });
+
+    revalidatePath('/');
+    revalidatePath('/productos');
+    if (prod?.slug) revalidatePath(`/productos/${prod.slug}`);
+    revalidatePath('/admin/productos');
+    revalidatePath(`/admin/productos/${input.productId}`);
+    revalidatePath('/admin/inventario');
+
+    return ok({ status: input.targetStatus });
+  } catch (err) {
+    return toActionError(err);
+  }
+}
+
+export async function deleteVariantAction(input: {
+  productId: string;
+  variantId: string;
+}): Promise<ActionResult<{ deleted: true }>> {
+  try {
+    const adminProfile = await requireAdminProfile();
+    const admin = createSupabaseAdminClient();
+
+    const { count: totalVariants } = await admin
+      .from('product_variants')
+      .select('id', { count: 'exact', head: true })
+      .eq('product_id', input.productId);
+
+    if ((totalVariants ?? 0) <= 1) {
+      return fail(
+        'CONFLICT',
+        'El producto debe conservar al menos una variante. Si querés ocultarlo, pasá el producto a borrador.'
+      );
+    }
+
+    const { count: salesCount } = await admin
+      .from('order_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('variant_id', input.variantId);
+
+    if ((salesCount ?? 0) > 0) {
+      return fail(
+        'CONFLICT',
+        'Esta variante tiene ventas registradas y no se puede eliminar para preservar el historial contable. Podés desactivarla (archivarla) en su lugar.'
+      );
+    }
+
+    const { data: inv } = await admin
+      .from('inventory_levels')
+      .select('reserved')
+      .eq('variant_id', input.variantId)
+      .maybeSingle();
+
+    if ((inv?.reserved ?? 0) > 0) {
+      return fail(
+        'CONFLICT',
+        'Esta variante tiene unidades reservadas en checkouts activos. Esperá a que expiren las reservas o desactivala.'
+      );
+    }
+
+    // Desvincular imágenes asociadas a esta variante y limpiar referencias sin ventas
+    await admin
+      .from('product_images')
+      .update({ variant_id: null })
+      .eq('variant_id', input.variantId);
+
+    await admin.from('cart_items').delete().eq('variant_id', input.variantId);
+    await admin
+      .from('stock_reservations')
+      .delete()
+      .eq('variant_id', input.variantId);
+    await admin
+      .from('inventory_movements')
+      .delete()
+      .eq('variant_id', input.variantId);
+    await admin
+      .from('inventory_levels')
+      .delete()
+      .eq('variant_id', input.variantId);
+
+    const { error: delErr } = await admin
+      .from('product_variants')
+      .delete()
+      .eq('id', input.variantId)
+      .eq('product_id', input.productId);
+
+    if (delErr) {
+      return fail(
+        'CONFLICT',
+        `No se pudo eliminar la variante: ${delErr.message}`
+      );
+    }
+
+    await syncProductVariantMetadata(admin, input.productId);
+
+    const { data: prod } = await admin
+      .from('products')
+      .select('slug')
+      .eq('id', input.productId)
+      .single();
+
+    await recordAuditLog({
+      actorUserId: adminProfile.id,
+      actorRole: adminProfile.role,
+      action: 'variant.deleted',
+      entityType: 'product_variant',
+      entityId: input.variantId,
+      metadata: { productId: input.productId },
+    });
+
+    revalidatePath('/');
+    revalidatePath('/productos');
+    if (prod?.slug) revalidatePath(`/productos/${prod.slug}`);
+    revalidatePath('/admin/productos');
+    revalidatePath(`/admin/productos/${input.productId}`);
+    revalidatePath('/admin/inventario');
+
+    return ok({ deleted: true });
+  } catch (err) {
+    return toActionError(err);
+  }
+}
+
+export async function uploadProductImagesBatchAction(formData: FormData): Promise<
+  ActionResult<{ uploadedCount: number }>
+> {
+  try {
+    const adminProfile = await requireAdminProfile();
+    const admin = createSupabaseAdminClient();
+
+    const productId = String(formData.get('productId') ?? '').trim();
+    const variantIdRaw = String(formData.get('variantId') ?? '').trim();
+    const altTextBase = String(formData.get('altText') ?? '').trim();
+
+    if (!productId) {
+      return fail('VALIDATION_ERROR', 'Producto inválido.');
+    }
+
+    const files = formData
+      .getAll('images')
+      .filter((item): item is File => item instanceof File && item.size > 0);
+
+    if (files.length === 0) {
+      return fail('VALIDATION_ERROR', 'Seleccioná al menos una imagen para subir.');
+    }
+
+    const { data: prod } = await admin
+      .from('products')
+      .select('name, slug')
+      .eq('id', productId)
+      .single();
+
+    const { data: existingImgs } = await admin
+      .from('product_images')
+      .select('id, sort_order')
+      .eq('product_id', productId)
+      .order('sort_order', { ascending: false });
+
+    const existingCount = existingImgs?.length ?? 0;
+    const baseSortOrder =
+      existingImgs && existingImgs.length > 0
+        ? (existingImgs[0]?.sort_order ?? 0) + 1
+        : 0;
+
+    let uploadedCount = 0;
+
+    for (let idx = 0; idx < files.length; idx += 1) {
+      const file = files[idx]!;
+      const rawBuffer = Buffer.from(await file.arrayBuffer());
+      const optimized = await optimizeProductImageToWebp(rawBuffer);
+
+      const storagePath = `products/${productId}/${Date.now()}-${idx}-${Math.random()
+        .toString(36)
+        .slice(2, 7)}.webp`;
+
+      const { error: uploadErr } = await admin.storage
+        .from('product-media')
+        .upload(storagePath, optimized.buffer, {
+          contentType: 'image/webp',
+          upsert: false,
+        });
+
+      if (uploadErr) {
+        return fail(
+          'INTERNAL_ERROR',
+          `Error al subir imagen a Storage: ${uploadErr.message}`
+        );
+      }
+
+      const {
+        data: { publicUrl },
+      } = admin.storage.from('product-media').getPublicUrl(storagePath);
+
+      const { error: dbErr } = await admin.from('product_images').insert({
+        product_id: productId,
+        variant_id: variantIdRaw || null,
+        storage_path: storagePath,
+        public_url: publicUrl,
+        alt_text:
+          altTextBase ||
+          `${prod?.name ?? 'Producto Zyven'} — Vista ${existingCount + idx + 1}`,
+        width: optimized.width,
+        height: optimized.height,
+        sort_order: baseSortOrder + idx,
+        is_primary: existingCount === 0 && idx === 0,
+      });
+
+      if (dbErr) {
+        return fail(
+          'INTERNAL_ERROR',
+          `No se pudo guardar la imagen en la base de datos: ${dbErr.message}`
+        );
+      }
+      uploadedCount += 1;
+    }
+
+    await recordAuditLog({
+      actorUserId: adminProfile.id,
+      actorRole: adminProfile.role,
+      action: 'product.images_uploaded',
+      entityType: 'product',
+      entityId: productId,
+      metadata: { uploadedCount, variantId: variantIdRaw || null },
+    });
+
+    revalidatePath('/');
+    revalidatePath('/productos');
+    if (prod?.slug) revalidatePath(`/productos/${prod.slug}`);
+    revalidatePath('/admin/productos');
+    revalidatePath(`/admin/productos/${productId}`);
+
+    return ok({ uploadedCount });
+  } catch (err) {
+    return toActionError(err);
+  }
+}
+
+export async function updateProductImageMetaAction(input: {
+  productId: string;
+  imageId: string;
+  variantId: string | null;
+  altText: string;
+}): Promise<ActionResult<{ imageId: string }>> {
+  try {
+    const adminProfile = await requireAdminProfile();
+    const admin = createSupabaseAdminClient();
+
+    const { error } = await admin
+      .from('product_images')
+      .update({
+        variant_id: input.variantId || null,
+        alt_text: input.altText.trim() || 'Imagen de producto Zyven Store',
+      })
+      .eq('id', input.imageId)
+      .eq('product_id', input.productId);
+
+    if (error) {
+      return fail('CONFLICT', `No se pudo actualizar la imagen: ${error.message}`);
+    }
+
+    const { data: prod } = await admin
+      .from('products')
+      .select('slug')
+      .eq('id', input.productId)
+      .single();
+
+    await recordAuditLog({
+      actorUserId: adminProfile.id,
+      actorRole: adminProfile.role,
+      action: 'product.image_updated',
+      entityType: 'product_image',
+      entityId: input.imageId,
+      afterState: {
+        variantId: input.variantId || null,
+        altText: input.altText.trim(),
+      },
+    });
+
+    revalidatePath('/');
+    revalidatePath('/productos');
+    if (prod?.slug) revalidatePath(`/productos/${prod.slug}`);
+    revalidatePath(`/admin/productos/${input.productId}`);
+
+    return ok({ imageId: input.imageId });
+  } catch (err) {
+    return toActionError(err);
+  }
+}
+
+export async function reorderProductImagesAction(input: {
+  productId: string;
+  orderedImageIds: string[];
+}): Promise<ActionResult<{ reordered: true }>> {
+  try {
+    const adminProfile = await requireAdminProfile();
+    const admin = createSupabaseAdminClient();
+
+    for (let idx = 0; idx < input.orderedImageIds.length; idx += 1) {
+      const imageId = input.orderedImageIds[idx]!;
+      await admin
+        .from('product_images')
+        .update({
+          sort_order: idx,
+          is_primary: idx === 0,
+        })
+        .eq('id', imageId)
+        .eq('product_id', input.productId);
+    }
+
+    const { data: prod } = await admin
+      .from('products')
+      .select('slug')
+      .eq('id', input.productId)
+      .single();
+
+    await recordAuditLog({
+      actorUserId: adminProfile.id,
+      actorRole: adminProfile.role,
+      action: 'product.images_reordered',
+      entityType: 'product',
+      entityId: input.productId,
+      afterState: { orderedImageIds: input.orderedImageIds },
+    });
+
+    revalidatePath('/');
+    revalidatePath('/productos');
+    if (prod?.slug) revalidatePath(`/productos/${prod.slug}`);
+    revalidatePath('/admin/productos');
+    revalidatePath(`/admin/productos/${input.productId}`);
+
+    return ok({ reordered: true });
+  } catch (err) {
+    return toActionError(err);
+  }
+}
+
+export async function deleteProductImageAction(input: {
+  productId: string;
+  imageId: string;
+}): Promise<ActionResult<{ deleted: true }>> {
+  try {
+    const adminProfile = await requireAdminProfile();
+    const admin = createSupabaseAdminClient();
+
+    const { data: img, error: fetchErr } = await admin
+      .from('product_images')
+      .select('id, storage_path, public_url, is_primary')
+      .eq('id', input.imageId)
+      .eq('product_id', input.productId)
+      .single();
+
+    if (fetchErr || !img) {
+      return fail('NOT_FOUND', 'Imagen no encontrada.');
+    }
+
+    const { error: delErr } = await admin
+      .from('product_images')
+      .delete()
+      .eq('id', input.imageId)
+      .eq('product_id', input.productId);
+
+    if (delErr) {
+      return fail('INTERNAL_ERROR', `No se pudo eliminar la imagen: ${delErr.message}`);
+    }
+
+    // Si estaba alojada en Supabase Storage (product-media), eliminar el archivo del bucket
+    if (
+      img.storage_path &&
+      !img.storage_path.startsWith('/') &&
+      img.public_url.includes('/storage/v1/object/public/product-media/')
+    ) {
+      await admin.storage.from('product-media').remove([img.storage_path]);
+    }
+
+    // Si era la imagen principal, promover la primera restante a portada
+    if (img.is_primary) {
+      const { data: nextImg } = await admin
+        .from('product_images')
+        .select('id')
+        .eq('product_id', input.productId)
+        .order('sort_order', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (nextImg) {
+        await admin
+          .from('product_images')
+          .update({ is_primary: true })
+          .eq('id', nextImg.id);
+      }
+    }
+
+    const { data: prod } = await admin
+      .from('products')
+      .select('slug')
+      .eq('id', input.productId)
+      .single();
+
+    await recordAuditLog({
+      actorUserId: adminProfile.id,
+      actorRole: adminProfile.role,
+      action: 'product.image_deleted',
+      entityType: 'product_image',
+      entityId: input.imageId,
+      beforeState: {
+        storagePath: img.storage_path,
+        publicUrl: img.public_url,
+      },
+    });
+
+    revalidatePath('/');
+    revalidatePath('/productos');
+    if (prod?.slug) revalidatePath(`/productos/${prod.slug}`);
+    revalidatePath('/admin/productos');
+    revalidatePath(`/admin/productos/${input.productId}`);
+
+    return ok({ deleted: true });
   } catch (err) {
     return toActionError(err);
   }

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Plus } from 'lucide-react';
+import { Pencil, Plus } from 'lucide-react';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { formatArs } from '@/lib/money';
 import { toggleProductPublicationAction } from '@/modules/products/actions';
@@ -140,6 +140,12 @@ export default async function AdminProductsPage() {
                           Ver
                         </Link>
                       ) : null}
+                      <Button asChild size="sm" variant="outline">
+                        <Link href={`/admin/productos/${p.id}`}>
+                          <Pencil className="h-3.5 w-3.5" />
+                          Editar
+                        </Link>
+                      </Button>
                       <form
                         action={async () => {
                           'use server';
